@@ -1,0 +1,240 @@
+#include "test.h"
+#include <cv.h>
+#include <highgui.h>
+#include <stdio.h>
+#include <math.h>
+//#include <opencv2\core\core.hpp>
+//#include <opencv2\highgui\highgui.hpp>
+
+using namespace cv;
+using namespace std;
+
+void Camera();
+void AVIplayer();
+void AVImaker();
+void connect(int h ,int w ,IplImage *src ,IplImage *dst);
+
+int main()
+{
+	//Camera();
+	//AVImaker();
+	AVIplayer();
+	system("pause");
+	return 0;
+}
+
+
+void AVIplayer()
+{
+	CvCapture *capture;
+    IplImage *frame ,*first ,*tmp ,*ans;
+	bool first_frame=false;
+	char AviFileName[]="t.avi";
+	capture=cvCaptureFromFile(AviFileName); //播放AVI的檔案
+    //cvNamedWindow("org",0);
+	//cvNamedWindow("tmp",0);
+	cvNamedWindow("ans",0);
+
+    while(true)
+    {
+		frame = cvQueryFrame(capture);
+		if(cvQueryFrame(capture))
+		{
+			uchar R ,G ,B;
+
+			/*宣告圖片基本資料 (會佔據記憶體)*/
+			tmp=cvCreateImage(cvSize(frame->width ,frame->height) ,IPL_DEPTH_8U ,3); //size=cvSize(frame->width ,frame->height);
+			ans=cvCreateImage(cvSize(frame->width ,frame->height) ,IPL_DEPTH_8U ,3);
+			
+			/*前處理*/
+			for(int h=0 ;h<frame->height ;++h)
+				for(int w=0 ;w<frame->width ;++w)
+				{
+					B=frame->imageData[3*(h*frame->width+w)]; //B
+					G=frame->imageData[3*(h*frame->width+w)+1]; //G
+					R=frame->imageData[3*(h*frame->width+w)+2]; //R
+
+					 /*膚色判斷後二值化*/
+					double r=(double)R/(double)(R+G+B) ,g=(double)G/(double)(R+G+B);
+					double Q_up=-1.2*(r-0.528)*(r-0.528)+0.377 ,Q_down=5*(r-0.535)*(r-0.535)+0.3 ,W=(r-0.33)*(r-0.33)+(g-0.33)*(g-0.33);
+					if(g<Q_up && g>Q_down && W>0.004) //膚色
+					{
+						tmp->imageData[3*(h*tmp->width+w)]=255; //B
+						tmp->imageData[3*(h*tmp->width+w)+1]=255; //G
+						tmp->imageData[3*(h*tmp->width+w)+2]=255; //R
+					}
+					else
+					{
+						tmp->imageData[3*(h*tmp->width+w)]=0; //B
+						tmp->imageData[3*(h*tmp->width+w)+1]=0; //G
+						tmp->imageData[3*(h*tmp->width+w)+2]=0; //R
+					}
+				}
+
+			/*侵蝕&膨脹運算*/
+			IplConvKernel *pKernel = NULL; //侵蝕結構
+			int pos=4; //侵蝕中心
+			pKernel = cvCreateStructuringElementEx(pos*2+1 ,pos*2+1 ,pos ,pos ,CV_SHAPE_RECT ,NULL); //mask行列 mask中心點 形狀結構
+
+			cvErode(tmp ,tmp ,pKernel ,1); //來源 結果 使用結構 侵蝕次數
+			cvDilate(tmp ,tmp ,pKernel ,1); //來源 結果 使用結構 膨脹次數
+
+			if(!first_frame) //還未得到第一張frame
+			{
+				first=cvCloneImage(tmp);
+				first_frame=true;
+			}
+
+
+			for(int h=0 ;h<tmp->height ;++h)
+				for(int w=0 ;w<tmp->width ;++w)
+				{
+					if(tmp->imageData[3*(h*tmp->width+w)]!=0) //找到白色
+					{
+						/*ans為全黑圖片*/
+						for(int i=0 ;i<ans->height ;++i)
+							for(int j=0 ;j<ans->width ;++j)
+							{
+								ans->imageData[3*(i*ans->width+j)]=0; //B
+								ans->imageData[3*(i*ans->width+j)+1]=0; //G
+								ans->imageData[3*(i*ans->width+j)+2]=0; //R
+							}
+
+						connect(h ,w ,tmp ,ans); //尋找連通區域
+
+						int area=0 ,top=ans->height ,down=0 ,right=0 ,left=ans->width;
+						 /*將找完的部分清除*/
+						for(int i=0 ;i<ans->height ;++i)
+							for(int j=0 ;j<ans->width ;++j)
+							{
+								if(ans->imageData[3*(i*ans->width+j)]!=0) //剛找到的區域
+								{
+									tmp->imageData[3*(i*tmp->width+j)]=0; //B
+									tmp->imageData[3*(i*tmp->width+j)+1]=0; //G
+									tmp->imageData[3*(i*tmp->width+j)+2]=0; //R
+									 
+									/*所在範圍*/
+									if(i<top) top=i;
+									if(i>down) down=i;
+									if(j<left) left=j;
+									if(j>right) right=j;
+									++area; //面積+1
+								}
+							}
+					}
+				}
+			
+
+			/*彩色
+			for(int h=0 ;h<ans->height ;++h)
+				for(int w=0 ;w<ans->width ;++w)
+				{
+					if(tmp->imageData[3*(h*tmp->width+w)]!=0 && first->imageData[3*(h*first->width+w)]==0)
+					{
+						B=frame->imageData[3*(h*frame->width+w)]; //B
+						G=frame->imageData[3*(h*frame->width+w)+1]; //G
+						R=frame->imageData[3*(h*frame->width+w)+2]; //R
+													
+						ans->imageData[3*(h*ans->width+w)]=B;
+						ans->imageData[3*(h*ans->width+w)+1]=G;
+						ans->imageData[3*(h*ans->width+w)+2]=R;
+					}
+					else
+					{
+						ans->imageData[3*(h*ans->width+w)]=0;
+						ans->imageData[3*(h*ans->width+w)+1]=0;
+						ans->imageData[3*(h*ans->width+w)+2]=0;
+					}
+				}*/
+
+			//cvShowImage("org" ,frame);
+			//cvShowImage("tmp" ,tmp);
+			cvShowImage("ans" ,ans);
+
+			/*釋放調記憶體 (圖片佔據)*/
+			cvReleaseImage(&tmp);
+			cvReleaseImage(&ans);
+			if(cvWaitKey(100)>=0) break; //控制擷取時間 ,cvWaitKey()為鍵盤事件 ,每超過 100 毫秒則會回傳-1
+		}
+		else break;
+    }
+
+	cvReleaseImage(&frame);
+	cvReleaseImage(&first);
+    cvReleaseCapture(&capture); //記憶體的釋放
+    //cvDestroyWindow("org");
+	//cvDestroyWindow("tmp");
+	cvDestroyWindow("ans");
+
+	return;
+}
+
+void connect(int H ,int W ,IplImage *src ,IplImage *dst)
+{
+	dst->imageData[3*(H*dst->width+W)]=255; //B
+	dst->imageData[3*(H*dst->width+W)+1]=255; //G
+	dst->imageData[3*(H*dst->width+W)+2]=255; //R
+
+	if(H>0) if(src->imageData[3*((H-1)*dst->width+W)]!=0 && dst->imageData[3*((H-1)*dst->width+W)]==0) connect(H-1 ,W ,src ,dst); //可往上 (上方為白 && 未找過) 往上
+	if(W>0) if(src->imageData[3*(H*dst->width+W-1)]!=0 && dst->imageData[3*(H*dst->width+W-1)]==0) connect(H ,W-1 ,src ,dst); //往左
+	if(H<dst->height-1) if(src->imageData[3*((H+1)*dst->width+W)]!=0 && dst->imageData[3*((H+1)*dst->width+W)]==0) connect(H+1 ,W ,src ,dst); //往下
+	if(W<dst->width-1) if(src->imageData[3*(H*dst->width+W+1)]!=0 && dst->imageData[3*(H*dst->width+W+1)]==0) connect(H ,W+1 ,src ,dst); //往右
+	if(H>0 && W>0) if(src->imageData[3*((H-1)*dst->width+W-1)]!=0 && dst->imageData[3*((H-1)*dst->width+W-1)]==0) connect(H-1 ,W-1 ,src ,dst); //往左上
+	if(H>0 && W<dst->width-1) if(src->imageData[3*((H-1)*dst->width+W+1)]!=0 && dst->imageData[3*((H-1)*dst->width+W+1)]==0) connect(H-1 ,W+1 ,src ,dst); //往右上
+	if(H<dst->height-1 && W>0) if(src->imageData[3*((H+1)*dst->width+W-1)]!=0 && dst->imageData[3*((H+1)*dst->width+W-1)]==0) connect(H+1 ,W-1 ,src ,dst); //往左下
+	if(H<dst->height-1 && W<dst->width-1) if(src->imageData[3*((H+1)*dst->width+W+1)]!=0 && dst->imageData[3*((H+1)*dst->width+W+1)]==0) connect(H+1 ,W+1 ,src ,dst); //往右下
+
+	return;
+}
+
+void Camera()
+{
+	CvCapture *capture;
+    IplImage *frame;
+    capture =cvCaptureFromCAM(0) ; // cvCaptureFromCAM(0) 來選定 Webcam ,0 代表自動偵測視訊裝置
+    cvNamedWindow("Webcam",0);
+    while(true)
+    {
+        frame = cvQueryFrame(capture); //擷取每秒顯示出來的frame
+        cvShowImage("Webcam",frame);
+        if(cvWaitKey(10)>=0) break; //控制擷取時間 ,cvWaitKey()為鍵盤事件 ,每超過 10 毫秒則會回傳-1
+    }
+    cvReleaseCapture(&capture); //記憶體的釋放
+    cvDestroyWindow("Webcam");
+	return;
+}
+void AVImaker()
+{
+	CvCapture *capture;
+    IplImage *frame;
+
+    capture=cvCreateCameraCapture(0);
+    cvNamedWindow("Webcam",0);
+
+    CvVideoWriter *writer;
+    char AviFileName[]="Output.avi";
+    int AviForamt = -1;
+    int FPS = 25;
+    CvSize AviSize = cvSize(640,480);
+    int AviColor = 1;
+    writer=cvCreateVideoWriter(AviFileName,AviForamt,FPS,AviSize,AviColor);
+
+    int i=0;
+    while(true)
+    {
+        frame = cvQueryFrame(capture);
+        cvWriteFrame(writer,frame);
+
+        cvShowImage("Webcam",frame);
+        printf("%d\n",i);
+
+        if(cvWaitKey(20)>0)     break;
+        i++;
+    }
+
+    cvReleaseCapture(&capture);
+    cvReleaseVideoWriter(&writer);
+    cvDestroyWindow("Webcam");
+
+	return;
+}
