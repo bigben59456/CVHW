@@ -12,7 +12,7 @@ using namespace std;
 void Camera();
 void AVIplayer();
 void AVImaker();
-void connect(int h ,int w ,IplImage *src ,IplImage *dst);
+void connect(int h ,int w ,IplImage *img);
 
 int main()
 {
@@ -27,24 +27,40 @@ int main()
 void AVIplayer()
 {
 	CvCapture *capture;
-    IplImage *frame ,*first ,*tmp ,*ans;
+    IplImage *frame ,*first ,*tmp;
 	bool first_frame=false;
-	char AviFileName[]="t.avi";
+	char AviFileName[]="test.avi";
+	int faceNum=0 ,cont_frame=0 ,face_dat[10]={0} ,ans=0;
+	bool counted[10]={false};
+
+	printf("AVI file : ");
+	scanf("%s" ,&AviFileName);
 	capture=cvCaptureFromFile(AviFileName); //播放AVI的檔案
-    //cvNamedWindow("org",0);
-	//cvNamedWindow("tmp",0);
-	cvNamedWindow("ans",0);
+    cvNamedWindow("org",0);
+	cvNamedWindow("tmp",0);
 
     while(true)
     {
 		frame = cvQueryFrame(capture);
+		++cont_frame;
+		if(cont_frame>20) //超過20張frame沒有臉出現
+		{
+			for(int i=0 ;i<10 ;++i)
+			{
+				face_dat[i]=0;
+				counted[i]=false;
+			}
+			if(faceNum!=0) printf("%d\n" ,ans);
+			ans=0;
+			faceNum=0;
+			cont_frame=0;
+		}
 		if(cvQueryFrame(capture))
 		{
-			uchar R ,G ,B;
+			char R ,G ,B;
 
 			/*宣告圖片基本資料 (會佔據記憶體)*/
 			tmp=cvCreateImage(cvSize(frame->width ,frame->height) ,IPL_DEPTH_8U ,3); //size=cvSize(frame->width ,frame->height);
-			ans=cvCreateImage(cvSize(frame->width ,frame->height) ,IPL_DEPTH_8U ,3);
 			
 			/*前處理*/
 			for(int h=0 ;h<frame->height ;++h)
@@ -56,7 +72,7 @@ void AVIplayer()
 
 					 /*膚色判斷後二值化*/
 					double r=(double)R/(double)(R+G+B) ,g=(double)G/(double)(R+G+B);
-					double Q_up=-1.2*(r-0.528)*(r-0.528)+0.377 ,Q_down=5*(r-0.535)*(r-0.535)+0.3 ,W=(r-0.33)*(r-0.33)+(g-0.33)*(g-0.33);
+					double Q_up=-1.1*(r-0.528)*(r-0.528)+0.378 ,Q_down=5*(r-0.535)*(r-0.535)+0.29 ,W=(r-0.33)*(r-0.33)+(g-0.33)*(g-0.33);
 					if(g<Q_up && g>Q_down && W>0.004) //膚色
 					{
 						tmp->imageData[3*(h*tmp->width+w)]=255; //B
@@ -77,7 +93,7 @@ void AVIplayer()
 			pKernel = cvCreateStructuringElementEx(pos*2+1 ,pos*2+1 ,pos ,pos ,CV_SHAPE_RECT ,NULL); //mask行列 mask中心點 形狀結構
 
 			cvErode(tmp ,tmp ,pKernel ,1); //來源 結果 使用結構 侵蝕次數
-			cvDilate(tmp ,tmp ,pKernel ,1); //來源 結果 使用結構 膨脹次數
+			cvDilate(tmp ,tmp ,pKernel ,2); //來源 結果 使用結構 膨脹次數
 
 			if(!first_frame) //還未得到第一張frame
 			{
@@ -85,34 +101,37 @@ void AVIplayer()
 				first_frame=true;
 			}
 
+			for(int h=0 ;h<tmp->height ;++h) //減去第一張frame
+				for(int w=0 ;w<tmp->width ;++w)
+				{
+					if(first->imageData[3*(h*first->width+w)]!=0) //第一張該區域為白
+					{
+						tmp->imageData[3*(h*tmp->width+w)]=0;
+						tmp->imageData[3*(h*tmp->width+w)+1]=0;
+						tmp->imageData[3*(h*tmp->width+w)+2]=0;
+					}
+				}
 
 			for(int h=0 ;h<tmp->height ;++h)
 				for(int w=0 ;w<tmp->width ;++w)
 				{
 					if(tmp->imageData[3*(h*tmp->width+w)]!=0) //找到白色
 					{
-						/*ans為全黑圖片*/
-						for(int i=0 ;i<ans->height ;++i)
-							for(int j=0 ;j<ans->width ;++j)
-							{
-								ans->imageData[3*(i*ans->width+j)]=0; //B
-								ans->imageData[3*(i*ans->width+j)+1]=0; //G
-								ans->imageData[3*(i*ans->width+j)+2]=0; //R
-							}
+						/*此點變色(準備連通)*/
+						char Bt=0 ,Gt=(h+1)*(w+1)*2%256 ,Rt=(h+1)*(w+1)*3%256;
+						tmp->imageData[3*(h*tmp->width+w)]=Bt;
+						tmp->imageData[3*(h*tmp->width+w)+1]=Gt;
+						tmp->imageData[3*(h*tmp->width+w)+2]=Rt;
 
-						connect(h ,w ,tmp ,ans); //尋找連通區域
+						connect(h ,w ,tmp); //尋找連通區域
 
-						int area=0 ,top=ans->height ,down=0 ,right=0 ,left=ans->width;
-						 /*將找完的部分清除*/
-						for(int i=0 ;i<ans->height ;++i)
-							for(int j=0 ;j<ans->width ;++j)
+						int area=0 ,top=tmp->height ,down=0 ,right=0 ,left=tmp->width;
+						 /*將找完的部分清除並記錄*/
+						for(int i=h ;i<tmp->height ;++i)
+							for(int j=0 ;j<tmp->width ;++j)
 							{
-								if(ans->imageData[3*(i*ans->width+j)]!=0) //剛找到的區域
+								if(tmp->imageData[3*(i*tmp->width+j)]==Bt && tmp->imageData[3*(i*tmp->width+j)+1]==Gt && tmp->imageData[3*(i*tmp->width+j)+2]==Rt) //剛找到的區域(彩色)
 								{
-									tmp->imageData[3*(i*tmp->width+j)]=0; //B
-									tmp->imageData[3*(i*tmp->width+j)+1]=0; //G
-									tmp->imageData[3*(i*tmp->width+j)+2]=0; //R
-									 
 									/*所在範圍*/
 									if(i<top) top=i;
 									if(i>down) down=i;
@@ -121,39 +140,63 @@ void AVIplayer()
 									++area; //面積+1
 								}
 							}
+
+						double a=right-left ,b=down-top;
+						/*是否是臉*/
+						if(area>1600 && area>a*b/2 && a>b*0.75 && b>a*0.75) //面積大於300 && 面積大於範圍的一半 && 長寬幾乎相同
+						{
+							bool find_face=false;
+
+							cont_frame=0; //沒找到任何臉的時間歸0
+							for(int p=0 ;p<faceNum ;++p)
+								if(face_dat[p]-((int)a/2+left)<(int)a/4 && face_dat[p]-((int)a/2+left)>-(int)a/4) //距離沒超過人臉半徑 是同一人
+								{
+									face_dat[faceNum]=(int)a/2+left; //資訊更新(只需x)
+									find_face=true;
+								}
+							if(!find_face) //不是已經存在的臉
+							{
+								++faceNum;
+								face_dat[faceNum]=(int)a/2+left;
+							}
+							for(int p=0 ;p<faceNum ;++p)
+								if(face_dat[p] < frame->width/4 && !counted[p]) //走出電梯判定
+								{
+									counted[p]=true;
+									++ans;
+								}
+
+							for(int i=top ;i<=down ;++i)
+							{
+								/*左邊界*/
+								frame->imageData[3*(i*frame->width+left)]=0; //B
+								frame->imageData[3*(i*frame->width+left)+1]=255; //G
+								frame->imageData[3*(i*frame->width+left)+2]=0; //R
+								/*右邊界*/
+								frame->imageData[3*(i*frame->width+right)]=0; //B
+								frame->imageData[3*(i*frame->width+right)+1]=255; //G
+								frame->imageData[3*(i*frame->width+right)+2]=0; //R
+							}
+							for(int i=left ;i<=right ;++i)
+							{
+								/*上邊界*/
+								frame->imageData[3*(top*frame->width+i)]=0; //B
+								frame->imageData[3*(top*frame->width+i)+1]=255; //G
+								frame->imageData[3*(top*frame->width+i)+2]=0; //R
+								/*下邊界*/
+								frame->imageData[3*(down*frame->width+i)]=0; //B
+								frame->imageData[3*(down*frame->width+i)+1]=255; //G
+								frame->imageData[3*(down*frame->width+i)+2]=0; //R
+							}
+						}
 					}
 				}
-			
 
-			/*彩色
-			for(int h=0 ;h<ans->height ;++h)
-				for(int w=0 ;w<ans->width ;++w)
-				{
-					if(tmp->imageData[3*(h*tmp->width+w)]!=0 && first->imageData[3*(h*first->width+w)]==0)
-					{
-						B=frame->imageData[3*(h*frame->width+w)]; //B
-						G=frame->imageData[3*(h*frame->width+w)+1]; //G
-						R=frame->imageData[3*(h*frame->width+w)+2]; //R
-													
-						ans->imageData[3*(h*ans->width+w)]=B;
-						ans->imageData[3*(h*ans->width+w)+1]=G;
-						ans->imageData[3*(h*ans->width+w)+2]=R;
-					}
-					else
-					{
-						ans->imageData[3*(h*ans->width+w)]=0;
-						ans->imageData[3*(h*ans->width+w)+1]=0;
-						ans->imageData[3*(h*ans->width+w)+2]=0;
-					}
-				}*/
-
-			//cvShowImage("org" ,frame);
-			//cvShowImage("tmp" ,tmp);
-			cvShowImage("ans" ,ans);
+			cvShowImage("org" ,frame);
+			cvShowImage("tmp" ,tmp);
 
 			/*釋放調記憶體 (圖片佔據)*/
 			cvReleaseImage(&tmp);
-			cvReleaseImage(&ans);
 			if(cvWaitKey(100)>=0) break; //控制擷取時間 ,cvWaitKey()為鍵盤事件 ,每超過 100 毫秒則會回傳-1
 		}
 		else break;
@@ -162,27 +205,55 @@ void AVIplayer()
 	cvReleaseImage(&frame);
 	cvReleaseImage(&first);
     cvReleaseCapture(&capture); //記憶體的釋放
-    //cvDestroyWindow("org");
-	//cvDestroyWindow("tmp");
-	cvDestroyWindow("ans");
+    cvDestroyWindow("org");
+	cvDestroyWindow("tmp");
 
 	return;
 }
 
-void connect(int H ,int W ,IplImage *src ,IplImage *dst)
+void connect(int H ,int W ,IplImage *img)
 {
-	dst->imageData[3*(H*dst->width+W)]=255; //B
-	dst->imageData[3*(H*dst->width+W)+1]=255; //G
-	dst->imageData[3*(H*dst->width+W)+2]=255; //R
+	/*
+	if(H>0) if(img->imageData[3*((H-1)*img->width+W)]!=0) connect(H-1 ,W ,img); //可往上 上方為白 往上
+	if(W>0) if(img->imageData[3*(H*img->width+W-1)]!=0) connect(H ,W-1 ,img); //往左
+	if(H<img->height-1) if(img->imageData[3*((H+1)*img->width+W)]!=0) connect(H+1 ,W ,img); //往下
+	if(W<img->width-1) if(img->imageData[3*(H*img->width+W+1)]!=0) connect(H ,W+1 ,img); //往右
+	if(H>0 && W>0) if(img->imageData[3*((H-1)*img->width+W-1)]!=0) connect(H-1 ,W-1 ,img); //往左上
+	if(H>0 && W<img->width-1) if(img->imageData[3*((H-1)*img->width+W+1)]!=0) connect(H-1 ,W+1 ,img); //往右上
+	if(H<img->height-1 && W>0) if(img->imageData[3*((H+1)*img->width+W-1)]!=0) connect(H+1 ,W-1 ,img); //往左下
+	if(H<img->height-1 && W<img->width-1) if(img->imageData[3*((H+1)*img->width+W+1)]!=0) connect(H+1 ,W+1 ,img); //往右下
+	*/
+	bool change=true ,exit=false;
 
-	if(H>0) if(src->imageData[3*((H-1)*dst->width+W)]!=0 && dst->imageData[3*((H-1)*dst->width+W)]==0) connect(H-1 ,W ,src ,dst); //可往上 (上方為白 && 未找過) 往上
-	if(W>0) if(src->imageData[3*(H*dst->width+W-1)]!=0 && dst->imageData[3*(H*dst->width+W-1)]==0) connect(H ,W-1 ,src ,dst); //往左
-	if(H<dst->height-1) if(src->imageData[3*((H+1)*dst->width+W)]!=0 && dst->imageData[3*((H+1)*dst->width+W)]==0) connect(H+1 ,W ,src ,dst); //往下
-	if(W<dst->width-1) if(src->imageData[3*(H*dst->width+W+1)]!=0 && dst->imageData[3*(H*dst->width+W+1)]==0) connect(H ,W+1 ,src ,dst); //往右
-	if(H>0 && W>0) if(src->imageData[3*((H-1)*dst->width+W-1)]!=0 && dst->imageData[3*((H-1)*dst->width+W-1)]==0) connect(H-1 ,W-1 ,src ,dst); //往左上
-	if(H>0 && W<dst->width-1) if(src->imageData[3*((H-1)*dst->width+W+1)]!=0 && dst->imageData[3*((H-1)*dst->width+W+1)]==0) connect(H-1 ,W+1 ,src ,dst); //往右上
-	if(H<dst->height-1 && W>0) if(src->imageData[3*((H+1)*dst->width+W-1)]!=0 && dst->imageData[3*((H+1)*dst->width+W-1)]==0) connect(H+1 ,W-1 ,src ,dst); //往左下
-	if(H<dst->height-1 && W<dst->width-1) if(src->imageData[3*((H+1)*dst->width+W+1)]!=0 && dst->imageData[3*((H+1)*dst->width+W+1)]==0) connect(H+1 ,W+1 ,src ,dst); //往右下
+	while(!exit)
+	{
+		exit=true;
+		for(int h=H ;h<img->height ;++h)
+			for(int w=0 ;w<img->width ;++w)
+			{
+				if(img->imageData[3*(h*img->width+w)]!=0) //白色
+				{
+					change=false;
+					if(h>0) if(img->imageData[3*((h-1)*img->width+w)]==0 && img->imageData[3*((h-1)*img->width+w)+1]!=0) change=true;//上面為綠色
+					if(w>0) if(img->imageData[3*(h*img->width+w-1)]==0 && img->imageData[3*(h*img->width+w-1)+1]!=0) change=true; //左
+					if(h<img->height-1) if(img->imageData[3*((h+1)*img->width+w)]==0 && img->imageData[3*((h+1)*img->width+w)+1]!=0) change=true; //下
+					if(w<img->width-1) if(img->imageData[3*(h*img->width+w+1)]==0 && img->imageData[3*(h*img->width+w+1)+1]!=0) change=true; //右
+					if(h>0 && w>0) if(img->imageData[3*((h-1)*img->width+w-1)]==0 && img->imageData[3*((h-1)*img->width+w-1)+1]!=0) change=true; //左上
+					if(h>0 && w<img->width-1) if(img->imageData[3*((h-1)*img->width+w+1)]==0 && img->imageData[3*((h-1)*img->width+w+1)+1]!=0) change=true; //右上
+					if(h<img->height-1 && w>0) if(img->imageData[3*((h+1)*img->width+w-1)]==0 && img->imageData[3*((h+1)*img->width+w-1)+1]!=0) change=true; //左下
+					if(h<img->height-1 && w<img->width-1) if(img->imageData[3*((h+1)*img->width+w+1)]==0 && img->imageData[3*((h+1)*img->width+w+1)+1]!=0)change=true ; //右下
+				}
+				else continue;
+
+				if(change)
+				{
+					img->imageData[3*(h*img->width+w)]=img->imageData[3*(H*img->width+W)];
+					img->imageData[3*(h*img->width+w)+1]=img->imageData[3*(H*img->width+W)+1];
+					img->imageData[3*(h*img->width+w)+2]=img->imageData[3*(H*img->width+W)+2];
+					exit=false;
+				}
+			}
+	}
 
 	return;
 }
