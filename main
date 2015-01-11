@@ -29,33 +29,32 @@ void AVIplayer()
 	CvCapture *capture;
     IplImage *frame ,*first ,*tmp;
 	bool first_frame=false;
-	char AviFileName[]="test.avi";
-	int faceNum=0 ,cont_frame=0 ,face_dat[10]={0} ,ans=0;
-	bool counted[10]={false};
+	char AviFileName[]="t.avi";
+	int faceNum=0 ,cont_frame=0 ,face_dat[20]={0} ,ans=0;
+	bool counted[20]={false};
 
 	printf("AVI file : ");
 	scanf("%s" ,&AviFileName);
 	capture=cvCaptureFromFile(AviFileName); //播放AVI的檔案
-    cvNamedWindow("org",0);
-	cvNamedWindow("tmp",0);
+    cvNamedWindow("face detect",0);
 
     while(true)
     {
 		frame = cvQueryFrame(capture);
 		++cont_frame;
-		if(cont_frame>20) //超過20張frame沒有臉出現
+		if(cont_frame>40) //超過40張frame沒有臉出現 (4秒)
 		{
-			for(int i=0 ;i<10 ;++i)
+			for(int i=0 ;i<20 ;++i)
 			{
 				face_dat[i]=0;
 				counted[i]=false;
 			}
-			if(faceNum!=0) printf("%d\n" ,ans);
+			if(ans!=0) printf("%d people exit.\n" ,ans);
 			ans=0;
 			faceNum=0;
 			cont_frame=0;
 		}
-		if(cvQueryFrame(capture))
+		if(cvQueryFrame(capture)) //if(frame = cvQueryFrame(capture))寫法速度較慢
 		{
 			char R ,G ,B;
 
@@ -73,7 +72,8 @@ void AVIplayer()
 					 /*膚色判斷後二值化*/
 					double r=(double)R/(double)(R+G+B) ,g=(double)G/(double)(R+G+B);
 					double Q_up=-1.1*(r-0.528)*(r-0.528)+0.378 ,Q_down=5*(r-0.535)*(r-0.535)+0.29 ,W=(r-0.33)*(r-0.33)+(g-0.33)*(g-0.33);
-					if(g<Q_up && g>Q_down && W>0.004) //膚色
+					//double Q_up=1.376*r*r+1.0743*r+0.1452 ,Q_down=0.776*r*r+0.5601*r+0.1766;
+					if(g<Q_up && g>Q_down && W>0.0004) //膚色
 					{
 						tmp->imageData[3*(h*tmp->width+w)]=255; //B
 						tmp->imageData[3*(h*tmp->width+w)+1]=255; //G
@@ -92,15 +92,14 @@ void AVIplayer()
 			int pos=4; //侵蝕中心
 			pKernel = cvCreateStructuringElementEx(pos*2+1 ,pos*2+1 ,pos ,pos ,CV_SHAPE_RECT ,NULL); //mask行列 mask中心點 形狀結構
 
-			cvErode(tmp ,tmp ,pKernel ,1); //來源 結果 使用結構 侵蝕次數
+			cvErode(tmp ,tmp ,pKernel ,2); //來源 結果 使用結構 侵蝕次數
 			cvDilate(tmp ,tmp ,pKernel ,2); //來源 結果 使用結構 膨脹次數
-
+			
 			if(!first_frame) //還未得到第一張frame
 			{
 				first=cvCloneImage(tmp);
 				first_frame=true;
 			}
-
 			for(int h=0 ;h<tmp->height ;++h) //減去第一張frame
 				for(int w=0 ;w<tmp->width ;++w)
 				{
@@ -111,7 +110,7 @@ void AVIplayer()
 						tmp->imageData[3*(h*tmp->width+w)+2]=0;
 					}
 				}
-
+				
 			for(int h=0 ;h<tmp->height ;++h)
 				for(int w=0 ;w<tmp->width ;++w)
 				{
@@ -143,29 +142,31 @@ void AVIplayer()
 
 						double a=right-left ,b=down-top;
 						/*是否是臉*/
-						if(area>1600 && area>a*b/2 && a>b*0.75 && b>a*0.75) //面積大於300 && 面積大於範圍的一半 && 長寬幾乎相同
+						//if(b<=2*a && 3*b>=2*a && area>a*b/2 && area>1500 && area<2000)
+						if(area>1500 && area>a*b/2 && a>b*0.7 && b>a*0.7) //面積大於1500 && 面積大於範圍的一半 && 長寬幾乎相同
 						{
 							bool find_face=false;
 
 							cont_frame=0; //沒找到任何臉的時間歸0
 							for(int p=0 ;p<faceNum ;++p)
-								if(face_dat[p]-((int)a/2+left)<(int)a/4 && face_dat[p]-((int)a/2+left)>-(int)a/4) //距離沒超過人臉半徑 是同一人
+								if(face_dat[p]-((int)a/2+left)<a/2 && face_dat[p]-((int)a/2+left)>-a/2) //距離沒超過人臉半徑 是同一人
 								{
-									face_dat[faceNum]=(int)a/2+left; //資訊更新(只需x)
+									face_dat[p]=(int)a/2+left; //資訊更新(只需x)
 									find_face=true;
 								}
 							if(!find_face) //不是已經存在的臉
 							{
-								++faceNum;
 								face_dat[faceNum]=(int)a/2+left;
+								++faceNum;
 							}
 							for(int p=0 ;p<faceNum ;++p)
-								if(face_dat[p] < frame->width/4 && !counted[p]) //走出電梯判定
+								if(face_dat[p] < frame->width/3 && !counted[p]) //走出電梯判定 && 未算過
 								{
-									counted[p]=true;
-									++ans;
+									counted[p]=true; //算過了
+									printf("%d\n" ,++ans); //人數+1
 								}
 
+							/*框出人臉*/
 							for(int i=top ;i<=down ;++i)
 							{
 								/*左邊界*/
@@ -192,12 +193,10 @@ void AVIplayer()
 					}
 				}
 
-			cvShowImage("org" ,frame);
-			cvShowImage("tmp" ,tmp);
-
-			/*釋放調記憶體 (圖片佔據)*/
-			cvReleaseImage(&tmp);
-			if(cvWaitKey(100)>=0) break; //控制擷取時間 ,cvWaitKey()為鍵盤事件 ,每超過 100 毫秒則會回傳-1
+			cvShowImage("face detect" ,frame); //顯示結果(圖)
+			
+			cvReleaseImage(&tmp); //釋放調記憶體 (圖片佔據)
+			if(cvWaitKey(50)>=0) break; //控制擷取時間 ,cvWaitKey()為鍵盤事件 ,每超過 100 毫秒則會回傳-1
 		}
 		else break;
     }
@@ -205,8 +204,7 @@ void AVIplayer()
 	cvReleaseImage(&frame);
 	cvReleaseImage(&first);
     cvReleaseCapture(&capture); //記憶體的釋放
-    cvDestroyWindow("org");
-	cvDestroyWindow("tmp");
+    cvDestroyWindow("face detect");
 
 	return;
 }
